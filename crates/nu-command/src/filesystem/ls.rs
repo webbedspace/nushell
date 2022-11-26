@@ -13,6 +13,7 @@ use nu_protocol::{
 };
 use pathdiff::diff_paths;
 
+use rayon::prelude::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -172,24 +173,18 @@ impl Command for Ls {
             ));
         }
 
-        let mut hidden_dirs = vec![];
-
         Ok(paths_peek
             .into_iter()
+            .collect::<Vec<_>>()
+            .into_par_iter()
             .filter_map(move |x| match x {
                 Ok(path) => {
                     let metadata = match std::fs::symlink_metadata(&path) {
                         Ok(metadata) => Some(metadata),
                         Err(_) => None,
                     };
-                    if path_contains_hidden_folder(&path, &hidden_dirs) {
-                        return None;
-                    }
 
                     if !all && !hidden_dir_specified && is_hidden_dir(&path) {
-                        if path.is_dir() {
-                            hidden_dirs.push(path);
-                        }
                         return None;
                     }
 
@@ -260,6 +255,8 @@ impl Command for Ls {
                 }
                 _ => Some(Value::Nothing { span: call_span }),
             })
+            // TODO: Implement into_pipeline_data() for parallel iterators
+            .collect::<Vec<_>>()
             .into_pipeline_data_with_metadata(
                 PipelineMetadata {
                     data_source: DataSource::Ls,
@@ -350,13 +347,6 @@ fn is_hidden_dir(dir: impl AsRef<Path>) -> bool {
             .map(|name| name.to_string_lossy().starts_with('.'))
             .unwrap_or(false)
     }
-}
-
-fn path_contains_hidden_folder(path: &Path, folders: &[PathBuf]) -> bool {
-    if folders.iter().any(|p| path.starts_with(p.as_path())) {
-        return true;
-    }
-    false
 }
 
 #[cfg(unix)]
